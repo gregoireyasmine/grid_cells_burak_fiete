@@ -1,4 +1,4 @@
-This repo aims at reproducing some of the results from 
+This repo includes reproductions of part of the results from 
 
 ### Accurate Path Integration in Continuous Attractor Network Models of Grid Cells 
 #### Burak & Fiete 2009
