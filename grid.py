@@ -3,6 +3,7 @@ from solvers import euler_solve, rk45_solve
 import os
 import torch
 import numpy
+from time import time
 
 wd = os.getcwd()
 MODEL_SAVEDIR = wd + '/models/'
@@ -16,7 +17,9 @@ if not os.path.exists(SIM_SAVEDIR):
 SOLVERS = {'euler': euler_solve, 'rk45': rk45_solve}
         
 class Grid():
-    def __init__(self, options, loadW=True, saveW=True, save_sim=False, sim_name = None):
+    """Burak & Fiete (2009) grid cells continuous attractor model"""
+    
+    def __init__(self, options, loadW=True, saveW=True, save_sim=False, initialize=True, load_s0 = True, save_s0 = True):
         self.options = options
         self.n = options.n        
         self.device = options.device
@@ -29,10 +32,10 @@ class Grid():
         
         self.vec_pref = torch.stack([torch.cos(self.theta_pref.flatten()), torch.sin(self.theta_pref.flatten())], 1).to(self.device) # prefered direction unit vector
 
-        self.W = self.build_W(load=loadW, save=saveW)
+        self.build_W(load=loadW, save=saveW)
  
         self.save_sim = save_sim
-        self.sim_name = sim_name
+        self.grid_id = self.options._str('all')
         
         if options.W_periodic : 
             self.A = 1
@@ -40,16 +43,22 @@ class Grid():
             raise NotImplementedError('Aperiodic case not implemented yet !')
             # A = torch.tensor(( XX < R - dr ) * 1 + ( XX >= R - dr ) * np.exp( -a0 * (XX - R + dr)**2 / dr**2 )).to(device)
 
+        self.s0 = 00.1*torch.rand(self.n**2)
+        
+        if initialize:
+            self.heal(restore = load_s0)
+
         
         
     def build_W(self, load=True, save=True):
-        fname = MODEL_SAVEDIR + self.options._str('W') + ".pth"
+        fname = MODEL_SAVEDIR + "Wmat_" +self.options._str('W') + ".pth"
 
         if load and os.path.exists(fname):
-            print(f"Recovering pre-computed matrix at {fname}")
-            W = torch.load(fname)
-            return W.to(self.device)
-        
+            print(f"Recovering pre-computed matrix found at {fname}")
+            W = torch.load(fname, weights_only=True)
+            self.W = W.to(self.device)
+            return 
+            
         print('Building new matrix from scratch')
         neuron_indexes = torch.arange(0, self.n**2, 1).to(self.device)
         
@@ -63,11 +72,10 @@ class Grid():
             X_diff =  torch.minimum(X_diff, self.n-X_diff)
 
         xx = torch.sum(X_diff.reshape(-1, X.shape[-1])**2, -1)
-        W = self.options.W_a*(torch.exp(-self.options.W_gamma*xx)-torch.exp(-self.options.W_beta*xx)).reshape(self.n**2, self.n**2).to(self.device)
+        self.W = self.options.W_a*(torch.exp(-self.options.W_gamma*xx)-torch.exp(-self.options.W_beta*xx)).reshape(self.n**2, self.n**2).to(self.device)
  
         if save :
-            torch.save(W.cpu(), fname)
-        return W
+            torch.save(self.W.cpu(), fname)
 
 
     def B(self, v):
@@ -81,18 +89,56 @@ class Grid():
             return (1/self.options.tau) * (-s + input_ * (input_ > 0))
         
         return derS
-
-    def simulate(v, s_0=None):
+    
+    
+    def simulate(self, v, sim_id=None, s_0=None, update_s0=False, silent=False):
         if s_0 is None:
-            s_0 = 00.1*torch.rand(n*n)
-        v = v.to(device).float()
-        s_0 = s_0.to(device).float()
+            s_0 = self.s0.clone()
+            
+        v = v.to(self.device).float()
+        s_0 = s_0.to(self.device).float()
         
         solver = SOLVERS[self.options.solver]
-        S = solver(self.derivative(), self.options.dt, v, s_0, device=self.options.device)
+        S = solver(self.derivative(), self.options.dt, v, s_0, device=self.options.device, silent=silent)
 
         if self.save_sim: 
             if self.sim_name is None :
-                self.sim_name = self.options._str('all') + '.pth'
-                
-                torch.save(S, SIM_SAVEDIR + self.sim_name)
+                self.sim_name = self.grid_id + '_' + str(int(time()))+ '.pth'
+                path = SIM_SAVEDIR + self.sim_name
+                print(f'saving simulation at {path}')
+                torch.save(S, path)
+
+        if update_s0 :
+            self.s0 = S[-1]
+            
+        return S
+
+    
+    def heal(self, restore = True, save=True, T=0.25, v_norm=0.8, angles = torch.tensor([0, torch.pi/5, torch.pi/2, -torch.pi/5])):
+        fname = MODEL_SAVEDIR + "s0_" + self.grid_id + ".pth"
+        
+        if restore and os.path.exists(fname):
+            print(f"Restoring pre-computed initial state found at {fname}")
+            self.s0 = torch.load(fname, weights_only=True)
+            return
+            
+        print("Building init state from scratch, might take a few seconds")
+
+        num_steps = int(T/self.options.dt)
+        v = torch.zeros((num_steps, 2))
+        
+        self.simulate(v, update_s0 = True, silent=True)
+        
+        for a in angles:
+            v = v_norm * torch.tensor([torch.cos(a), torch.sin(a)]) * torch.ones_like(v)
+            traces = self.simulate(v, update_s0=True, silent=True)
+        
+        v = torch.zeros((num_steps, 2))
+        self.simulate(v, update_s0=True, silent=True)
+
+        if save :
+            torch.save(self.s0, fname)
+            
+            
+
+

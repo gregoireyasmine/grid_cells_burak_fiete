@@ -1,7 +1,9 @@
 from tqdm import tqdm
+import torch
+from scipy.integrate import solve_ivp
 
 def euler_solve(derS, dt, v, s_0, device='cpu', silent=False):
-    S = torch.zeros((len(v), s_0.shape[0], s_0.shape[1])).to(device)
+    S = torch.zeros((len(v), s_0.shape[0])).to(device)
     S[0] = s_0
     v_t = lambda t: v[t]
     
