@@ -168,3 +168,15 @@ def plot_trajectory(loc_x, loc_y, box_width=None, box_height=None, ax=None, show
     if show :
         plt.show()
     return ax
+
+
+def compare_model_prediction(predicted_position, true_position, box_width=None, box_height=None, show=True):
+    fig, ax = plt.subplots(figsize=(5, 5), dpi = 200)
+    kw = {'c': 'black', 'ls': '-', 'lw':1.4, 'label':'True position'}
+    ax = plot_trajectory(*true_position.T, box_width = box_width, box_height = box_height,ax=ax, show=False, plot_kwargs=kw)
+    kw = {'c': 'red', 'ls': ':', 'lw':0.7, 'label':'Model prediction'}
+    ax = plot_trajectory(*predicted_position.T, box_width = box_width, box_height = box_height,ax=ax, show=False, plot_kwargs=kw)
+    ax.scatter(*true_position[0], c='blue', s=10, marker='o', label='Initial position')
+    ax.scatter(*true_position[-1], c='green', s=10, marker='o', label='Final position')
+    plt.legend()
+    plt.show()
