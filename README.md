@@ -23,3 +23,5 @@ This project is our final project for Theoretical Neuroscience class at ENS-PSL.
 
 - **A unified theory for the computational and mechanistic origins of grid cells** 
 *Ben Sorscher, Gabriel C. Mel, Samuel A. Ocko, Lisa M. Giocomo, Surya Ganguli* (2023) Neuron  https://doi.org/10.1016/j.neuron.2022.10.003
+Authors github >>> https://github.com/ganguli-lab/grid-pattern-formation
+
