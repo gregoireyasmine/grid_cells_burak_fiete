@@ -1,0 +1,7 @@
+opencv-python==4.10.0.84
+numpy==2.2.1
+matplotlib==3.10
+torch==2.5.1
+scipy==1.14.1
+scikit-image==0.25.0
+scikit_learn==1.6.0

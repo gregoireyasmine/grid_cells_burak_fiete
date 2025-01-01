@@ -1,6 +1,8 @@
 import numpy as np
 from tqdm import tqdm
+import os
 
+TRAJ_DIR = os.getcwd() + '/sim_data/'
 def avoid_wall(border_region, position, hd, box_width, box_height):
     '''
     Compute distance and angle to nearest wall
@@ -21,13 +23,18 @@ def avoid_wall(border_region, position, hd, box_width, box_height):
 
     return is_near_wall, turn_angle
     
-def generate_trajectory(box_width, box_height, seq_len, batch_size, dt=1E-4, silent=True):
+def generate_trajectory(box_width, box_height, seq_len, batch_size, dt=1E-4, rot_vel_std=1.6, v_mean = 0.8,  border=0.03, border_slow = 0.25, load=False, save=False, silent=True):
     '''Generate a random walk in a rectangular box. Adapted from https://github.com/ganguli-lab/grid-pattern-formation'''
-
-    sigma = 0.8 * 2 * dt**0.5  # stdev rotation velocity (rads/sec)
-    b = 0.13 * 2 * np.pi  # forward velocity rayleigh dist scale (m/sec)
+    
+    fpath = TRAJ_DIR+f"trajectory_len={seq_len}_dt={dt}_w={box_width}_h={box_height}_rotvelstd={rot_vel_std}_meanv={v_mean}_border={border}_borderslow={border_slow}.npy"
+    if load and os.path.exists(fpath):
+        print(f"Found pre-computed trajectory at {fpath}, loading it")
+        return np.load(fpath, allow_pickle = True).item()
+    
+    sigma = rot_vel_std * dt**0.5  # stdev rotation velocity (rads/sec)
+    b = v_mean  # forward velocity rayleigh dist scale (m/sec) TODO: check scaling with dt
     mu = 0  # turn angle bias 
-    border_region = 0.03  # meters
+    border_region = border  # meters
 
     # Initialize variables
     position = np.zeros([batch_size, seq_len + 2, 2])
@@ -50,7 +57,7 @@ def generate_trajectory(box_width, box_height, seq_len, batch_size, dt=1E-4, sil
 
             # If in border region, turn and slow down
         is_near_wall, turn_angle = avoid_wall(border_region, position[:, t], head_dir[:, t], box_width, box_height)
-        v[is_near_wall] *= 0.25
+        v[is_near_wall] *= border_slow
 
         # Update turn angle
         turn_angle += random_turn[:, t]
@@ -81,5 +88,8 @@ def generate_trajectory(box_width, box_height, seq_len, batch_size, dt=1E-4, sil
     traj['target_hd'] = head_dir[:, 1:-1]
     traj['target_x'] = position[:, 2:, 0]
     traj['target_y'] = position[:, 2:, 1]
+
+    if save:
+        np.save(fpath, traj)
 
     return traj
