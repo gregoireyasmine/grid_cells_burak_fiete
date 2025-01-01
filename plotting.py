@@ -3,7 +3,7 @@ import torch
 import numpy as np
 # import cv2
 import tqdm 
-from analysis import pca_torch_gpu, blob_center
+from analysis import *
 import matplotlib.gridspec as gridspec
 
 
@@ -133,7 +133,7 @@ def plot_s0(grid, ax, title='Resting state activity', cbar=True, cmap='magma'):
     
 
 
-def network_presentation(grid):
+def network_presentation(grid, show=True):
     # Create a figure and define the grid specification with adjusted width ratios
     fig = plt.figure(figsize=(12, 3))
     
@@ -151,14 +151,20 @@ def network_presentation(grid):
 
     # Adjust margins: Add extra space between plot 1 and plot 2, but keep others close
     plt.subplots_adjust(left=0.0, right=0.95, bottom=0.1, top=0.9, wspace=0.4)
-
+    
+    if show:
+        plt.show()
     return fig, [fig.axes[i] for i in range(4)]
 
 
-def plot_trajectory(loc_x, loc_y, box_width, box_height, ax=None):
+def plot_trajectory(loc_x, loc_y, box_width=None, box_height=None, ax=None, show=False, plot_kwargs={}):
     if ax is None:
         fig, ax = plt.subplots()
-    ax.plot(loc_x, loc_y)
-    ax.set_xlim(-box_width/2, box_width/2)
-    ax.set_ylim(-box_height/2, box_height/2)
+    ax.plot(loc_x, loc_y, **plot_kwargs)
+    if box_width is not None:
+        ax.set_xlim(-box_width/2, box_width/2)
+    if box_height is not None:
+        ax.set_ylim(-box_height/2, box_height/2)
+    if show :
+        plt.show()
     return ax

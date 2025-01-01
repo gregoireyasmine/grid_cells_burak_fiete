@@ -2,6 +2,8 @@ import torch
 from skimage.filters import threshold_otsu
 from scipy.ndimage import label, center_of_mass, gaussian_filter
 import numpy as np
+from sklearn.linear_model import LinearRegression
+from tqdm import tqdm
 
 def pca_torch_gpu(data, num_components):
     device = data.device
@@ -22,7 +24,7 @@ def pca_torch_gpu(data, num_components):
     return projected_data, explained_variance, components
 
 
-def blob_center(traces, n_candidates = 8, smoothing = 2, verb=False, sort_centers = False):
+def blob_center(traces, smoothing = 2, verb=False, sort_centers = False):
     t=1 if traces.ndim ==1 else len(traces)
     n = int(np.sqrt(traces.shape[-1]))
     
@@ -36,8 +38,9 @@ def blob_center(traces, n_candidates = 8, smoothing = 2, verb=False, sort_center
     N= []
     if verb:
         print('labeling blobs')
-        
-    for i in range(len(binary_images)):
+
+    iterator = tqdm(range(len(binary_images))) if verb else range(len(binary_images))
+    for i in iterator:
         labeled, num_features = label(binary_images[i])
         labeled_images[i] = labeled
         N.append(num_features)
@@ -47,8 +50,10 @@ def blob_center(traces, n_candidates = 8, smoothing = 2, verb=False, sort_center
         print(f'detected less than {m} blobs per frame')
         print(f'computing blob centers')
 
+
+    iterator = tqdm(range(len(binary_images))) if verb else range(len(binary_images))
     centers = np.stack([np.array(center_of_mass(binary_images[i], labeled_images[i], range(1, m+1)))
-           for i in range(vid.shape[0])])
+           for i in iterator])  # TODO : remove divide warning
     
     centers = centers[:, :, [1, 0]] # need to transpose x, y for some reason
     dist = np.linalg.norm(centers-n/2, axis=2)
@@ -60,12 +65,14 @@ def blob_center(traces, n_candidates = 8, smoothing = 2, verb=False, sort_center
     pred = centers[np.arange(0, t, 1), np.nanargmin(dist, axis=1), :].squeeze()
     return pred, centers
     
-def recover_speed_from_blob(center_coords, threshold = 3):
+    
+def recover_speed_from_blob(center_coords, threshold = 3, verb=False):
     v_center = np.diff(center_coords, axis=0)
     v_norm = np.linalg.norm(v_center, axis=1)
     
     idx_jumps = np.where(v_norm>threshold)[0]
-    print(f"found {len(idx_jumps)} jumps : interpolating speed between them")
+    if verb:
+        print(f"found {len(idx_jumps)} best blob jumps : interpolating speed between them")
 
     v = v_center.copy()
     new_i = True
@@ -85,3 +92,27 @@ def recover_speed_from_blob(center_coords, threshold = 3):
         
     return v, idx_jumps
 
+                     
+def rescale_pos(true_pos, predicted_pos):
+    model = LinearRegression(fit_intercept=False)
+    true_pos = true_pos[:len(predicted_pos)]
+    y = (true_pos - true_pos[0]).flatten() # start at origin
+    X = predicted_pos.flatten().reshape(-1, 1)
+    model.fit(X, y)
+    prop_factor = model.coef_[0]
+    rescaled_pos = prop_factor*predicted_pos + true_pos[0]
+    r2 = model.score(X, y)
+    return rescaled_pos, prop_factor, r2
+
+    
+
+def model_prediction(model_output, true_pos, silent=False, image_smoothing = 2, dt=1E-4, verb=True):
+    best_center, _ = blob_center(model_output, smoothing = image_smoothing, verb=verb)
+    predicted_speed, _ = recover_speed_from_blob(best_center, verb = verb)
+    predicted_pos = np.cumsum(predicted_speed, axis=0)
+    rescaled_pos, prop_factor, r2 = rescale_pos(true_pos, predicted_pos)
+    if verb :
+        print(rf"Estimated prediction to truth size ratio = {np.round(prop_factor, 4)}, R2={np.round(r2, 3)}")
+    return rescaled_pos, prop_factor, r2
+
+    

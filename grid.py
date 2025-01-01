@@ -94,6 +94,9 @@ class Grid():
     def simulate(self, v, sim_id=None, s_0=None, update_s0=False, silent=False):
         if s_0 is None:
             s_0 = self.s0.clone()
+
+        if type(v) != torch.Tensor : 
+            v = torch.Tensor(v)
             
         v = v.to(self.device).float()
         s_0 = s_0.to(self.device).float()
@@ -102,16 +105,17 @@ class Grid():
         S = solver(self.derivative(), self.options.dt, v, s_0, device=self.options.device, silent=silent)
 
         if self.save_sim: 
-            if self.sim_name is None :
-                self.sim_name = self.grid_id + '_' + str(int(time()))+ '.pth'
-                path = SIM_SAVEDIR + self.sim_name
-                print(f'saving simulation at {path}')
-                torch.save(S, path)
+            if sim_id is None :
+                sim_id = self.grid_id + '_' + str(int(time()))+ '.pth'
+            
+            path = SIM_SAVEDIR + sim_id
+            print(f'saving simulation at {path}')
+            torch.save(S.cpu(), path)
 
         if update_s0 :
             self.s0 = S[-1]
             
-        return S
+        return S.cpu()
 
     
     def heal(self, restore = True, save=True, T=0.25, v_norm=0.8, angles = torch.tensor([0, torch.pi/5, torch.pi/2, -torch.pi/5])):
