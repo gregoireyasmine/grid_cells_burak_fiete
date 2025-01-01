@@ -91,7 +91,17 @@ class Grid():
         return derS
     
     
-    def simulate(self, v, sim_id=None, s_0=None, update_s0=False, silent=False):
+    def simulate(self, v, sim_id=None, s_0=None, update_s0=False, silent=False, load=False):
+        if sim_id is None :
+                sim_id = self.grid_id + '_' + str(int(time()))+ '.pth'
+
+        path = SIM_SAVEDIR + sim_id
+        
+        if load and os.path.exists(path):
+            print(f"loading pre-computed trajectory at {path}")
+            S= torch.load(path, weights_only = True)
+            return S
+        
         if s_0 is None:
             s_0 = self.s0.clone()
 
@@ -105,10 +115,6 @@ class Grid():
         S = solver(self.derivative(), self.options.dt, v, s_0, device=self.options.device, silent=silent)
 
         if self.save_sim: 
-            if sim_id is None :
-                sim_id = self.grid_id + '_' + str(int(time()))+ '.pth'
-            
-            path = SIM_SAVEDIR + sim_id
             print(f'saving simulation at {path}')
             torch.save(S.cpu(), path)
 
