@@ -4,8 +4,13 @@ from trajectory_generator import generate_trajectory
 from tqdm import tqdm
 import numpy as np
 
+
 class Place_cells():
-    # uniform deterministic n*n tiling of place cells on the square arena
+    """
+    Regular deterministic sheet_size*sheet_size tiling of place cells on the square arena.
+    Cells activate proportionally to the distance between their preferred location and the animal position.
+    """
+    
     def __init__(self, sheet_size, sigma, space_size, device):
         '''
         Args:
@@ -18,36 +23,56 @@ class Place_cells():
         self.device = device
         self.loc = torch.stack([self.cell_idx%sheet_size, self.cell_idx//sheet_size], axis = -1).to(device)
         self.sigma = sigma * sheet_size * space_size
+        self.logsoftmax = torch.nn.LogSoftmax(dim=-1)
         self.softmax = torch.nn.Softmax(dim=-1)
 
     def out(self, pos):
         """ Return grid cell pattern activation """
         dist = ((pos[:, :, None, :] - self.loc[None, None, :])**2).sum(axis=-1)
         return self.softmax(- self.sigma**(-2) * dist)
+        
+    def logout(self, pos):
+        """ Return log grid cell pattern activation (for computational stability during training)"""
+        dist = ((pos[:, :, None, :] - self.loc[None, None, :])**2).sum(axis=-1)
+        return self.logsoftmax(- self.sigma**(-2) * dist)
 
 
 class RNN_options():
+    """
+    Options to pass to the TrainableNetwork class.
+    """
+
     def __init__(self,):
         self.save_dir = os.getcwd() + '/models/'
         self.n_steps = 100000         # number of training steps
         self.batch_size = 200         # number of trajectories per batch
         self.sequence_length = 20     # number of steps in trajectory
-        self.learning_rate = 1e-5     # gradient descent learning rate
-        self.pc_sheet_size = 23      # sqrt of number of place cells 
+        self.learning_rate = 1e-4     # gradient descent learning rate
+        self.pc_sheet_size = 23       # sqrt of number of place cells 
         self.gc_sheet_size = 40       # sqrt of number of grid cells
         self.pc_sigma = 0.12          # width of place cell center tuning curve (m)
         self.activation = 'tanh'      # recurrent nonlinearity
         self.weight_decay = 1e-4      # strength of weight decay on recurrent weights
-        self.box_width = 2.2            # width of square arena 
+        self.box_width = 2.2          # width of square arena 
         self.dt = 1E-2
+        self.optimizer = 'adam'       # adam or rmsprop
         self.device = "cuda" if torch.cuda.is_available() else 'cpu'
+        self.clip_grad = False
+        self.debug = False
 
     def _str(self,):
        attributes = vars(self).copy()
        del attributes['save_dir']
+       del attributes['debug']
        return "_".join([f"{key}_{value}" for key, value in attributes.items()])
+
     
 class TrainableNetwork(torch.nn.Module):
+    """
+    Simple architecture linear encoder -> RNN -> linear decoder
+    Encoder and decoder allow to switch between grid cells representations of space to place cells representations
+    RNN should learn an abstract representation of space that allows to integrate velocity inputs.
+    """
     def __init__(self, options):
         super().__init__()
         self.options = options 
@@ -66,32 +91,47 @@ class TrainableNetwork(torch.nn.Module):
         self.decoder = torch.nn.Linear(self.n_gc, self.n_pc, bias=False).to(options.device)
         
         self.softmax = torch.nn.Softmax(dim=-1)
+        self.logsoftmax = torch.nn.LogSoftmax(dim=-1)
 
     
     def forward(self, inputs):
         v, p0 = inputs
-        init_state = self.encoder(self.place_cells.out(p0))
+
+        pc_0 = self.place_cells.out(p0)
+        init_state = self.encoder(pc_0)
         g, hidden = self.RNN(v, init_state)
         scores = self.decoder(g)
-        pred = self.softmax(scores)
-        return pred, scores, hidden, g, init_state
+        if self.options.debug:
+            print(f"pc0 ranging in : {pc_0.min(), pc_0.max()}")
+            print(f"init_state ranging in : {(init_state.min(), init_state.max())}")
+            print(f"v ranging in : {(v.min(), v.max())}")
+            print(f"g ranging in : {(g.min(), g.max())}")
+            
+        logpred = self.logsoftmax(scores)
+        return logpred, scores, hidden, g, init_state
 
 
-    def loss(self, pred, pos):
+    def loss(self, logpred, pos):
         true_gc = self.place_cells.out(pos)
 
-        loss = -(true_gc*torch.log(pred)).sum(-1).mean()
+        loss = -(true_gc*logpred).sum(-1).mean() # CE Loss with precomputed log (numerical stability)
         # Weight regularization 
         loss += self.options.weight_decay * (self.RNN.weight_hh_l0**2).sum()
 
         # Compute decoding error
-        pred_pos = self.place_cells.loc[torch.argmax(pred, axis=-1)]
-        err = torch.sqrt(((pos - pred_pos)**2).sum(-1)).mean()
+        pred_pos = self.place_cells.loc[torch.argmax(logpred, axis=-1)]
+        err = torch.sqrt(((pos - pred_pos)**2).sum(-1)).mean() * self.options.box_width/self.options.pc_sheet_size
 
         return loss, err
 
 
 class TrajectoryGenerator():
+    """
+    Generates batched trajectories using the generate_trajectory function in the trajectory_generator.py file.
+    Each trajectory encountered by the network is new. 
+    NB : Any non-uniformity in the sampled animal locations distribution is likely to bias the network and make stick it in a local loss minima.
+    """
+    
     def __init__(self, model):
         self.box_width = model.options.box_width
         self.box_height = model.options.box_width
@@ -100,6 +140,7 @@ class TrajectoryGenerator():
         self.dt = model.options.dt
         self.device = model.options.device
 
+    
     def generator(self):
         while True:
             traj = generate_trajectory(self.box_width, self.box_height, self.sequence_length, self.batch_size, self.dt)
@@ -117,14 +158,15 @@ class TrajectoryGenerator():
 
             yield inputs, pos
         
-    
 
 class Trainer(object):
+    
     def __init__(self, model, restore=True):
         self.options = model.options
         self.model = model
         lr = self.options.learning_rate
-        self.optimizer = torch.optim.RMSprop(self.model.parameters(), lr=lr)
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr) if self.options.optim == 'adam' else torch.optim.RMSprop(self.model.parameters(), lr=lr)
+        
 
         self.generator = TrajectoryGenerator(model)
         self.loss = []
@@ -145,11 +187,19 @@ class Trainer(object):
     
     def train_step(self, inputs, pos):
         self.model.zero_grad()
-        pred = self.model(inputs)[0]
-        loss, err = self.model.loss(pred, pos)
+        logpred = self.model(inputs)[0]
+        
+        if self.options.debug:
+            print(f"logpred ranging in ({logpred.min()}, {logpred.max()})")
+            print(f"pos ranging in ({pos.min()}, {pos.max()})")
+            
+        loss, err = self.model.loss(logpred, pos)
+        if self.options.debug:
+            print("loss :", loss)
+
         loss.backward()
         self.optimizer.step()
-        return loss.item(), err.item()
+        return loss, err.item()
 
     
     def train(self, n_epochs: int = 1000, n_steps=10000, save=True):
@@ -164,8 +214,17 @@ class Trainer(object):
                 inputs, pos = next(gen) 
                 
                 loss, err = self.train_step(inputs, pos)
-                self.loss.append(loss)
-                self.err.append(err)
+
+                if self.options.debug :
+                     print(f"Total grad norm = {self._gradient_norm_()} ")
+
+                if torch.isnan(loss):
+                    break
+
+                else :
+                    loss = loss.item()
+                    self.loss.append(loss)
+                    self.err.append(err)
 
                 tbar.set_description(f'Epoch {epoch_idx}/{n_epochs} step {step_idx}/{n_steps} : Loss {loss:.2f} Error = {100*err:5.1f} cm')
 
@@ -174,4 +233,13 @@ class Trainer(object):
                 ckpt_path = os.path.join(self.ckpt_dir, 'epoch_{}.pth'.format(epoch_idx))
                 torch.save(self.model.state_dict(), ckpt_path)
                 torch.save(self.model.state_dict(), os.path.join(self.ckpt_dir, 'most_recent_model.pth'))
-        
+
+    def _gradient_norm_(self):
+        "a debug function to compute gradient norm"
+        total_norm = 0
+        for p in self.model.parameters():
+            if p.grad is not None:
+                param_norm = p.grad.data.norm(2)
+                total_norm += param_norm.item() ** 2
+        total_norm = total_norm ** 0.5
+        return total_norm
