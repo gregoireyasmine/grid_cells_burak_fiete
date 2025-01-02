@@ -1,2 +1,4 @@
 sim_data/*
 models/*
+__pycache__/*
+
