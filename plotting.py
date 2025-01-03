@@ -5,6 +5,15 @@ import numpy as np
 import tqdm 
 from analysis import *
 import matplotlib.gridspec as gridspec
+from matplotlib.ticker import FormatStrFormatter
+
+plt.rcParams.update({
+    'xtick.labelsize': 8,  # Tick label font size (x-axis)
+    'ytick.labelsize': 8,  # Tick label font size (y-axis)
+    'legend.fontsize': 8, # Legend font size
+    'axes.titlesize': 10,  # Optional: Adjust title size
+    'axes.labelsize': 8   # Optional: Adjust axes label size
+})
 
 
 def plot_10_frames(traj, dt, plot_center = True, plot_blob_centers=True):
@@ -181,25 +190,26 @@ def plot_trajectory(loc_x, loc_y, box_width=None, box_height=None, ax=None, show
     if show_limits : 
         ax.scatter(loc_x[0], loc_y[0], c='blue', s=10, marker='o', label='Initial position')
         ax.scatter(loc_x[-1], loc_y[-1], c='green', s=10, marker='o', label='Final position')
-        
+
+    ax.set_xticks([])
+    ax.set_yticks([])  
+
     if show :
         plt.show()
-        
+
     return ax
 
 
-def compare_model_prediction(predicted_position, true_position, box_width=None, box_height=None, show=True):
-    
-    fig, ax = plt.subplots(figsize=(5, 5), dpi = 200)
+def compare_model_prediction(predicted_position, true_position, ax = None, box_width=None, show_limits = True, box_height=None, show=True):
+
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(4, 4), dpi = 200)
     
     kw = {'c': 'black', 'ls': '-', 'lw':1.4, 'label':'True position'}
-    ax = plot_trajectory(*true_position.T, box_width = box_width, box_height = box_height,ax=ax, show=False, show_limits = True, plot_kwargs=kw)
+    ax = plot_trajectory(*true_position.T, box_width = box_width, box_height = box_height,ax=ax, show=False, show_limits = show_limits, plot_kwargs=kw)
     
     kw = {'c': 'red', 'ls': ':', 'lw':0.7, 'label':'Model prediction'}
     ax = plot_trajectory(*predicted_position.T, box_width = box_width, box_height = box_height,ax=ax, show=False, show_limits = False, plot_kwargs=kw)
-    
-    ax.scatter(*true_position[0], c='blue', s=10, marker='o', label='Initial position')
-    ax.scatter(*true_position[-1], c='green', s=10, marker='o', label='Final position')
     
     plt.legend()
     if show :
@@ -208,11 +218,12 @@ def compare_model_prediction(predicted_position, true_position, box_width=None, 
     return ax
 
 
-def place_cells_activity(place_cells, idx = None, ax=None, show=True, cbar = True, cmap = 'magma'):
+def show_place_cell_activity(place_cells, box_width=None, idx = None, ax=None, show=True, cbar = True, cmap = 'magma'):
+    
     if idx is None :
         idx = np.random.randint(0, place_cells.sheet_size**2)
 
-    loc = place_cells.loc.unsqueeze(1).to(place_cells.device)
+    loc = place_cells.loc_box.unsqueeze(1).to(place_cells.device)
 
     activity = place_cells.out(loc)[idx].cpu().reshape(place_cells.sheet_size, place_cells.sheet_size)
 
@@ -222,13 +233,21 @@ def place_cells_activity(place_cells, idx = None, ax=None, show=True, cbar = Tru
     im= ax.imshow(activity, cmap = cmap)
     
     if cbar:
-        cbar = plt.colorbar(im, ax=ax, orientation='vertical', pad=0.02, shrink=0.8)
+        cbar = plt.colorbar(im, ax=ax, orientation='vertical', ticks=None, pad=0.02, shrink=0.8)
         cbar.set_label('Cell activation', rotation=270, labelpad=10)
 
-
+    
     ax.set_title('Arbitrary place cell activation')
-    ax.set_xlabel('Animal x location (m)')
-    ax.set_ylabel('Animal y location (m)')
+
+    if box_width is not None : 
+        ax.set_xticks([0, (place_cells.sheet_size-1)/2, place_cells.sheet_size-1])
+        ax.set_yticks([0, (place_cells.sheet_size-1)/2, place_cells.sheet_size-1])   
+ 
+        ax.set_xticklabels([-box_width/2, 0, box_width/2])
+        ax.set_yticklabels([-box_width/2, 0, box_width/2])
+
+        ax.set_xlabel('Animal x location (m)')
+        ax.set_ylabel('Animal y location (m)')
     
     if show:
         plt.show()
@@ -238,9 +257,9 @@ def place_cells_activity(place_cells, idx = None, ax=None, show=True, cbar = Tru
 
 def present_training_environment(network, trainer, num_trajectories = 10, show=True):
     
-    fig, ax = plt.subplots(1, 2, figsize = (10, 5))
+    fig, ax = plt.subplots(1, 2, figsize = (10, 4))
     
-    place_cells_activity(network.place_cells, ax=ax[0], show=False)
+    show_place_cell_activity(network.place_cells, box_width=network.options.box_width, ax=ax[0], show=False)
     
     trajectories = next(trainer.generator.generator())[1].cpu()
     
@@ -261,3 +280,36 @@ def present_training_environment(network, trainer, num_trajectories = 10, show=T
         plt.show()
     
     return fig, ax
+
+
+def show_training_results(trainer, model, num_trajectories = 10000, sequence_length = 20, plotted_trajectories = 10, dt=1e-2, show=True):
+    
+    fig, ax = plt.subplots(1, 2, figsize = (9, 3.5), dpi=200)
+        
+    inputs, trajectories = trainer.generator.batch(n_trajectories = num_trajectories, sequence_length = sequence_length, dt=dt)
+    
+    predictions, err = model.test_pred(inputs, trajectories)
+    trajectories = trajectories.cpu()
+    sem = err.std(1)/(num_trajectories**0.5)
+    err = err.mean(1)
+
+    for k in range(plotted_trajectories):
+        ax[0] = compare_model_prediction(predictions[:, k, :], trajectories[:, k, :], ax = ax[0], box_width = model.options.box_width,
+                                         show_limits = True, show=False)
+        
+    handles, labels = ax[0].get_legend_handles_labels()
+    unique = dict(zip(labels, handles))
+    ax[0].legend(unique.values(), unique.keys(), loc = 'upper right')
+    
+    ax[1].plot(err*100)
+    ax[1].fill_between(range(sequence_length), (err-sem)*100, (err+sem)*100, alpha = 0.2)
+    ax[1].set_xlabel('time step in trajectory')
+    ax[1].set_ylabel('average error (cm)')
+    # ax[1].yaxis.set_major_formatter(FormatStrFormatter('%.1f'))
+
+    if show:
+        plt.show()
+
+    return fig, ax
+    
+    

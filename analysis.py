@@ -115,4 +115,6 @@ def model_prediction(model_output, true_pos, silent=False, image_smoothing = 2, 
         print(rf"Estimated prediction to truth size ratio = {np.round(prop_factor, 4)}, R2={np.round(r2, 3)}")
     return rescaled_pos, prop_factor, r2
 
+        
+    
     

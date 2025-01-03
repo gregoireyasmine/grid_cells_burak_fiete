@@ -3,7 +3,8 @@ import os
 from trajectory_generator import generate_trajectory
 from tqdm import tqdm
 import numpy as np
-
+import matplotlib.pyplot as plt
+from IPython.display import clear_output
 
 class Place_cells():
     """
@@ -21,19 +22,22 @@ class Place_cells():
         self.sheet_size = sheet_size
         self.cell_idx = torch.arange(0, sheet_size**2, 1)
         self.device = device
-        self.loc = torch.stack([self.cell_idx%sheet_size, self.cell_idx//sheet_size], axis = -1).to(device)
-        self.sigma = sigma * sheet_size * space_size
+        
+        self.loc_sheet = torch.stack([self.cell_idx%sheet_size, self.cell_idx//sheet_size], axis = -1).to(device)
+        self.loc_box = (self.loc_sheet/self.sheet_size - 1/2) * space_size
+        
+        self.sigma = sigma
         self.logsoftmax = torch.nn.LogSoftmax(dim=-1)
         self.softmax = torch.nn.Softmax(dim=-1)
 
     def out(self, pos):
         """ Return grid cell pattern activation """
-        dist = ((pos[:, :, None, :] - self.loc[None, None, :])**2).sum(axis=-1)
+        dist = ((pos[:, :, None, :] - self.loc_box[None, None, :])**2).sum(axis=-1)
         return self.softmax(- self.sigma**(-2) * dist)
         
     def logout(self, pos):
         """ Return log grid cell pattern activation (for computational stability during training)"""
-        dist = ((pos[:, :, None, :] - self.loc[None, None, :])**2).sum(axis=-1)
+        dist = ((pos[:, :, None, :] - self.loc_box[None, None, :])**2).sum(axis=-1)
         return self.logsoftmax(- self.sigma**(-2) * dist)
 
 
@@ -69,7 +73,7 @@ class RNN_options():
     
 class TrainableNetwork(torch.nn.Module):
     """
-    Simple architecture linear encoder -> RNN -> linear decoder
+    Simple architecture (gridcell input -> linear encoder -> RNN -> linear decoder -> gridcell output]
     Encoder and decoder allow to switch between grid cells representations of space to place cells representations
     RNN should learn an abstract representation of space that allows to integrate velocity inputs.
     """
@@ -109,8 +113,7 @@ class TrainableNetwork(torch.nn.Module):
             
         logpred = self.logsoftmax(scores)
         return logpred, scores, hidden, g, init_state
-
-
+        
     def loss(self, logpred, pos):
         true_gc = self.place_cells.out(pos)
 
@@ -119,11 +122,22 @@ class TrainableNetwork(torch.nn.Module):
         loss += self.options.weight_decay * (self.RNN.weight_hh_l0**2).sum()
 
         # Compute decoding error
-        pred_pos = self.place_cells.loc[torch.argmax(logpred, axis=-1)]
-        err = torch.sqrt(((pos - pred_pos)**2).sum(-1)).mean() * self.options.box_width/self.options.pc_sheet_size
+        pred_pos = self.place_cells.loc_box[torch.argmax(logpred, axis=-1)] 
+        err = torch.sqrt(((pos - pred_pos)**2).sum(-1)).mean()
 
         return loss, err
 
+    def test_pred(self, inputs, pos):
+        with torch.no_grad():
+            
+            logpred = self.forward(inputs)[0]
+            
+            pred_pos = self.place_cells.loc_box[torch.argmax(logpred, axis=-1)]
+            
+            err = torch.sqrt(((pos - pred_pos)**2).sum(-1))
+            
+        return pred_pos.cpu(), err.cpu()
+        
 
 class TrajectoryGenerator():
     """
@@ -140,23 +154,25 @@ class TrajectoryGenerator():
         self.dt = model.options.dt
         self.device = model.options.device
 
-    
+
+    def batch(self, n_trajectories, sequence_length, dt):
+        traj = generate_trajectory(self.box_width, self.box_height, sequence_length, n_trajectories, dt)
+
+        v = np.stack([traj['ego_v'] * np.cos(traj['target_hd']), traj['ego_v'] * np.sin(traj['target_hd'])], axis=-1)
+        v = torch.tensor(v, dtype=torch.float32).transpose(0, 1).to(self.device)
+
+        pos = np.stack([traj['target_x'], traj['target_y']], axis=-1)
+        pos = torch.tensor(pos, dtype=torch.float32).transpose(0, 1).to(self.device)
+            
+        init_pos = np.concatenate([traj['init_x'], traj['init_y']], axis=1)
+        init_pos = torch.tensor(init_pos, dtype=torch.float32).to(self.device)
+
+        inputs = (v, init_pos[None])
+        return inputs, pos
+        
     def generator(self):
         while True:
-            traj = generate_trajectory(self.box_width, self.box_height, self.sequence_length, self.batch_size, self.dt)
-
-            v = np.stack([traj['ego_v'] * np.cos(traj['target_hd']), traj['ego_v'] * np.sin(traj['target_hd'])], axis=-1)
-            v = torch.tensor(v, dtype=torch.float32).transpose(0, 1).to(self.device)
-
-            pos = np.stack([traj['target_x'], traj['target_y']], axis=-1)
-            pos = torch.tensor(pos, dtype=torch.float32).transpose(0, 1).to(self.device)
-            
-            init_pos = np.concatenate([traj['init_x'], traj['init_y']], axis=1)
-            init_pos = torch.tensor(init_pos, dtype=torch.float32).to(self.device)
-
-            inputs = (v, init_pos[None])
-
-            yield inputs, pos
+            yield self.batch(self.batch_size, self.sequence_length, self.dt)
         
 
 class Trainer(object):
@@ -201,15 +217,27 @@ class Trainer(object):
         self.optimizer.step()
         return loss, err.item()
 
-    
-    def train(self, n_epochs: int = 1000, n_steps=10000, save=True):
 
-        tbar = tqdm(range(n_steps), leave=False)
+    def plot_loss_err(self):
+        clear_output(wait=True)
+        fig, ax = plt.subplots(1, 2, figsize=(10, 4))
+        ax[0].plot(np.log(self.loss))
+        ax[0].set_title("Log Loss")
+        ax[1].plot(self.err)
+        ax[1].set_title("Error (cm)")
+        ax[0].set_xlabel('Step')
+        ax[1].set_xlabel('Step')
+        plt.show()
+
+    
+    def train(self, n_epochs: int = 1000, n_steps=10000, save=True, plot=True, plot_every = 50):
 
         gen = self.generator.generator()
         
         for epoch_idx in range(n_epochs):
-            for step_idx in range(n_steps):
+            
+            tbar = tqdm(range(n_steps), leave=False)
+            for step_idx in tbar:
                 
                 inputs, pos = next(gen) 
                 
@@ -226,7 +254,10 @@ class Trainer(object):
                     self.loss.append(loss)
                     self.err.append(err)
 
-                tbar.set_description(f'Epoch {epoch_idx}/{n_epochs} step {step_idx}/{n_steps} : Loss {loss:.2f} Error = {100*err:5.1f} cm')
+                tbar.set_description(f'Epoch {epoch_idx}/{n_epochs} step {step_idx} : Loss {loss:.2f} Error = {100*err:5.1f} cm')
+
+                if plot and (step_idx+1)%plot_every == 0 :
+                    self.plot_loss_err()
 
             if save:
                 # Save checkpoint
