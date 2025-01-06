@@ -9,7 +9,7 @@ class Options():
         self.W_beta = 3/(self.lambda_net**2) # inner limit of the inhib surround
         self.W_periodic = True
         self.W_a = 1.5 # if a > 1, close surround of cells is activatory
-        self.W_l = 0.5 # spatial shift size of the center of the inhibitory surround
+        self.W_l = 2 # spatial shift size of the center of the inhibitory surround
         self.n=40 
         self.solver = 'euler'
         self.device = 'cpu'

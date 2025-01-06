@@ -3,19 +3,24 @@ import torch
 from scipy.integrate import solve_ivp
 
 def euler_solve(derS, dt, v, s_0, device='cpu', silent=False):
-    S = torch.zeros((len(v), s_0.shape[0])).to(device)
-    S[0] = s_0
-    v_t = lambda t: v[t]
-    
-    if not silent : 
-        print('Simulating with euler method')
+    batch_size, num_steps, num_dir = v.shape  # Number of trajectories in the batch
+    num_neurons = s_0.shape[-1]  # Number of neurons (n^2)
+    S = torch.zeros((batch_size, num_steps, num_neurons)).to(device)
+    S[:, 0, :] = s_0  
 
-    if silent : 
-        iterator = range(len(v[:-1]))
+    v_t = lambda t: v[:, t]  
+    
+    if not silent: 
+        print('Simulating with Euler method')
+        iterator = tqdm(range(num_steps-1))
+        
     else : 
-        iterator = tqdm(range(len(v[:-1])))
+        iterator = range(num_steps-1)
+
     for t in iterator:
-        S[t + 1] = S[t] + dt*derS(t, S[t], v_t)
+        der = derS(t, S[:, t], v_t)
+        S[:, t + 1] = S[:, t] + dt * der
+    
     return S
 
 def rk45_solve(derS, dt, v, s_0):

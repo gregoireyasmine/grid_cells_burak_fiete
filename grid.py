@@ -79,48 +79,62 @@ class Grid():
 
 
     def B(self, v):
-        return self.A * (1 + self.options.alpha * self.vec_pref@v)
+        return self.A * (1 + self.options.alpha * torch.matmul(v, self.vec_pref.T))
 
     
     def derivative(self):
         
         def derS(t, s, v_t):
-            input_ = self.W @ s + self.B(v_t(t))
+            input_ = torch.matmul(s, self.W) + self.B(v_t(t))
             return (1/self.options.tau) * (-s + input_ * (input_ > 0))
         
         return derS
     
     
     def simulate(self, v, sim_id=None, s_0=None, update_s0=False, silent=False, load=False):
-        if sim_id is None :
-                sim_id = self.grid_id + '_' + str(int(time()))+ '.pth'
-
+        if sim_id is None:
+            sim_id = self.grid_id + '_' + str(int(time())) + '.pth'
+    
         path = SIM_SAVEDIR + sim_id
         
         if load and os.path.exists(path):
             print(f"loading pre-computed trajectory at {path}")
-            S= torch.load(path, weights_only = True)
+            S = torch.load(path, weights_only=True)
             return S
         
         if s_0 is None:
             s_0 = self.s0.clone()
-
-        if type(v) != torch.Tensor : 
+    
+        if type(v) != torch.Tensor:
             v = torch.Tensor(v)
-            
-        v = v.to(self.device).float()
-        s_0 = s_0.to(self.device).float()
-        
-        solver = SOLVERS[self.options.solver]
-        S = solver(self.derivative(), self.options.dt, v, s_0, device=self.options.device, silent=silent)
+        if type(s_0) != torch.Tensor:
+            s_0 = torch.Tensor(s_0)
+    
+        if v.device != self.device:
+            v = v.to(self.device).float()  
+        if s_0.device != self.device:
+            s_0 = s_0.to(self.device).float() 
+    
+        if v.dim() == 2:  # Handle batches
+            v = v.unsqueeze(0)
 
-        if self.save_sim: 
+        batch_size = v.shape[0]
+        if s_0.dim() == 1:  
+            s_0 = s_0.expand(batch_size, -1)  # Expand initial state to match the batch size
+        elif s_0.dim() == 2 and s_0.shape[0] != batch_size:  # Mismatched batch size
+            raise ValueError("Batch size of v and s_0 must match.")
+
+        solver = SOLVERS[self.options.solver]
+    
+        S = solver(self.derivative(), self.options.dt, v, s_0, device=self.options.device, silent=silent)
+    
+        if self.save_sim:
             print(f'saving simulation at {path}')
             torch.save(S.cpu(), path)
-
-        if update_s0 :
-            self.s0 = S[-1]
-            
+    
+        if update_s0:
+            self.s0 = S[0, -1]
+    
         return S.cpu()
 
     
@@ -147,7 +161,7 @@ class Grid():
         self.simulate(v, update_s0=True, silent=True)
 
         if save :
-            torch.save(self.s0, fname)
+            torch.save(self.s0.cpu(), fname)
             
             
 

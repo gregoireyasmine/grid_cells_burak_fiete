@@ -26,13 +26,14 @@ def avoid_wall(border_region, position, hd, box_width, box_height):
 def generate_trajectory(box_width, box_height, seq_len, batch_size, dt=1E-4, rot_vel_std=1.6, v_mean = 0.8,  border=0.03, border_slow = 0.25, load=False, save=False, silent=True):
     '''Generate a random walk in a rectangular box. Adapted from https://github.com/ganguli-lab/grid-pattern-formation'''
     
-    fpath = TRAJ_DIR+f"trajectory_len={seq_len}_dt={dt}_w={box_width}_h={box_height}_rotvelstd={rot_vel_std}_meanv={v_mean}_border={border}_borderslow={border_slow}.npy"
+    fpath = TRAJ_DIR+f"trajectory_batchsize={batch_size}_len={seq_len}_dt={dt}_w={box_width}_h={box_height}_rotvelstd={rot_vel_std}_meanv={v_mean}_border={border}_borderslow={border_slow}.npy"
+    
     if load and os.path.exists(fpath):
         print(f"Found pre-computed trajectory at {fpath}, loading it")
         return np.load(fpath, allow_pickle = True).item()
     
     sigma = rot_vel_std * dt**0.5  # stdev rotation velocity (rads/sec)
-    b = v_mean  # forward velocity rayleigh dist scale (m/sec) TODO: check scaling with dt
+    b = v_mean  # forward velocity rayleigh dist scale (m/sec)
     mu = 0  # turn angle bias 
     border_region = border  # meters
 
@@ -75,11 +76,12 @@ def generate_trajectory(box_width, box_height, seq_len, batch_size, dt=1E-4, rot
 
     traj = {}
     
-    # Input variables
+    # Encoder input variables
     traj['init_hd'] = head_dir[:, 0, None]
     traj['init_x'] = position[:, 1, 0, None]
     traj['init_y'] = position[:, 1, 1, None]
 
+    # Angles and speed norm
     traj['ego_v'] = velocity[:, 1:-1]
     ang_v = np.diff(head_dir, axis=-1)
     traj['phi_x'], traj['phi_y'] = np.cos(ang_v)[:, :-1], np.sin(ang_v)[:, :-1]
@@ -88,6 +90,9 @@ def generate_trajectory(box_width, box_height, seq_len, batch_size, dt=1E-4, rot
     traj['target_hd'] = head_dir[:, 1:-1]
     traj['target_x'] = position[:, 2:, 0]
     traj['target_y'] = position[:, 2:, 1]
+
+    # RNN input variable (vector speed)
+    traj['input_v'] = np.stack([traj['ego_v'] * np.cos(traj['target_hd']), traj['ego_v'] * np.sin(traj['target_hd'])], axis=-1)/dt
 
     if save:
         np.save(fpath, traj)

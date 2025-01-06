@@ -158,7 +158,7 @@ class TrajectoryGenerator():
     def batch(self, n_trajectories, sequence_length, dt):
         traj = generate_trajectory(self.box_width, self.box_height, sequence_length, n_trajectories, dt)
 
-        v = np.stack([traj['ego_v'] * np.cos(traj['target_hd']), traj['ego_v'] * np.sin(traj['target_hd'])], axis=-1)
+        v = traj['input_v']
         v = torch.tensor(v, dtype=torch.float32).transpose(0, 1).to(self.device)
 
         pos = np.stack([traj['target_x'], traj['target_y']], axis=-1)
@@ -223,7 +223,7 @@ class Trainer(object):
         fig, ax = plt.subplots(1, 2, figsize=(10, 4))
         ax[0].plot(np.log(self.loss))
         ax[0].set_title("Log Loss")
-        ax[1].plot(self.err)
+        ax[1].plot(self.err*100)
         ax[1].set_title("Error (cm)")
         ax[0].set_xlabel('Step')
         ax[1].set_xlabel('Step')
