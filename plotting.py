@@ -4,8 +4,15 @@ import numpy as np
 # import cv2
 import tqdm 
 from analysis import *
+import matplotlib as mpl
 import matplotlib.gridspec as gridspec
 from matplotlib.ticker import FormatStrFormatter
+import os
+import cv2
+from matplotlib.colors import ListedColormap
+
+
+FIG_PATH = os.getcwd() + '/figures/'
 
 plt.rcParams.update({
     'xtick.labelsize': 8,  # Tick label font size (x-axis)
@@ -14,6 +21,7 @@ plt.rcParams.update({
     'axes.titlesize': 10,  # Optional: Adjust title size
     'axes.labelsize': 8   # Optional: Adjust axes label size
 })
+mpl.rcParams['figure.dpi'] = 150
 
 
 def plot_10_frames(traj, dt, plot_center = True, plot_blob_centers=True):
@@ -27,46 +35,71 @@ def plot_10_frames(traj, dt, plot_center = True, plot_blob_centers=True):
             ax[k//5, k%5].axvline(n/2, c='red', lw=0.8)
             ax[k//5, k%5].axhline(n/2, c='red', lw=0.8)
         if plot_blob_centers:
-            center_coords, p = blob_center(traj[t, :], n_candidates=5, smoothing = 1, verb=False, sort_centers = True)
+            center_coords, p = blob_center(traj[t, :], smoothing = 1, verb=False, sort_centers = True)
             ax[k//5, k%5].scatter(p[0, 1:, 0], p[0, 1:, 1], c='red', marker='x')
             ax[k//5, k%5].scatter(p[0, 0, 0], p[0, 0, 1], c='blue', marker='+')
     plt.show()
 
 
-def rec_movie(traces, fpath, dt, speed_ratio=1/4, cmap='magma'):
+def rec_movie(traces, fpath, dt, speed_ratio=1/4, plot_center=True, plot_blob_centers=False, frame_labels=None, cmap='magma'):
+    import matplotlib.pyplot as plt
+    import cv2
+    import numpy as np
+    from tqdm import tqdm
+
     # Paramètres de la vidéo
-    fps = int(1/dt) * speed_ratio  # frames per second
+    fps = int(1 / dt) * speed_ratio  # frames per second
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # Codec
 
     n = int(np.sqrt(traces.shape[1]))
     fig, ax = plt.subplots()
-    ax.axis('off')  
+    ax.axis('off')  # Supprime la bordure de l'axe
+    ax.set_xticks([])  # Supprime les ticks sur l'axe x
+    ax.set_yticks([])  # Supprime les ticks sur l'axe y
     plt.tight_layout()
 
     generated_images = []
 
-    print('generating movie...')
-    for frame in tqdm(traces.reshape(-1, n, n)):
-        ax.imshow(frame, cmap=cmap, interpolation=None) 
-        fig.canvas.draw() 
+    print('Generating video...')
 
+    height, width = None, None
+    
+    for t, frame in tqdm(enumerate(traces.reshape(-1, n, n))):
+        ax.clear()  # Réinitialiser l'axe au lieu de le recréer
+        ax.imshow(frame, cmap=cmap, interpolation=None)
+        ax.set_xticks([])  # Supprime les ticks sur l'axe x
+        ax.set_yticks([])  # Supprime les ticks sur l'axe y
+
+        if plot_center:
+            ax.axvline(n / 2, c='red', lw=0.8)
+            ax.axhline(n / 2, c='red', lw=0.8)
+            
+        if plot_blob_centers:
+            center_coords, p = blob_center(traces[t, :], smoothing=1, verb=False, sort_centers=True)
+            ax.scatter(p[0, 1:, 0], p[0, 1:, 1], c='red', marker='x')
+            ax.scatter(p[0, 0, 0], p[0, 0, 1], c='blue', marker='+') 
+
+        if frame_labels is not None:
+            ax.set_title(frame_labels[t], fontsize=12)  # Ajoute le titre avec une taille de police réduite
+        
+        plt.subplots_adjust(top=0.9)  # Réduit la marge supérieure pour donner plus d'espace pour le titre
+        
+        fig.canvas.draw()
         image = np.frombuffer(fig.canvas.buffer_rgba(), dtype=np.uint8)
         image = image.reshape(fig.canvas.get_width_height()[::-1] + (4,))  # Format (hauteur, largeur, 4)
-        image = cv2.cvtColor(image, cv2.COLOR_RGBA2BGR) 
-        
-        generated_images.append(image)
+        image = cv2.cvtColor(image, cv2.COLOR_RGBA2BGR)
 
-        plt.close(fig)  
+        if height is None or width is None:
+            height, width, _ = image.shape
+            video_writer = cv2.VideoWriter(fpath, fourcc, fps, (width, height))
 
-    height, width, _ = generated_images[0].shape
-    video_writer = cv2.VideoWriter(fpath, fourcc, fps, (width, height))
+        video_writer.write(image)  # Écriture directe dans la vidéo
 
-    for img in generated_images:
-        video_writer.write(cv2.cvtColor(img, cv2.COLOR_RGB2BGR))  # Convert RGB to BGR for OpenCV
-
-    video_writer.release()
+    video_writer.release()  # Finaliser l'écriture de la vidéo
+    plt.close(fig)
     print(f"Video recorded at {fpath}")
     return None
+
 
 
 def plot_4d_projection(traces, basis=None, eigval=None, dpi=100):
@@ -153,7 +186,7 @@ def plot_s0(grid, ax, title='Resting state activity', cbar=True, cmap='magma'):
     
 
 
-def network_presentation(grid, show=True):
+def network_presentation(grid, show=True, save=True):
     
     fig = plt.figure(figsize=(12, 3))
     
@@ -170,7 +203,9 @@ def network_presentation(grid, show=True):
     
     if show:
         plt.show()
-        
+
+    if save :
+        plt.savefig(FIG_PATH+"network_presentation.png", transparent=True)
     return fig, [fig.axes[i] for i in range(4)]
 
 
@@ -311,5 +346,39 @@ def show_training_results(trainer, model, num_trajectories = 10000, sequence_len
         plt.show()
 
     return fig, ax
+
+
+def create_alpha_colormap(alpha_low=0.0, alpha_high=0.8, color = np.array([[0.8, 0., 0.1, 1]])):
+    alpha_values = np.linspace(alpha_low, alpha_high, 256)
     
+    colors = np.tile(color, (256, 1))
+    colors[:, -1] = alpha_values  
+    
+    return ListedColormap(colors)
+
+
+
+def plot_rate_over_trajectory(pos, activity, idx=None, show=True, save=True):
+    fig, ax = plt.subplots(figsize = (4, 4))
+    
+    custom_cmap = create_alpha_colormap(alpha_low=0.0, alpha_high=1.0)
+    ax.set_facecolor('black')
+
+    if idx is None:
+        idx = np.random.randint(activity.shape[1])
+
+    plt.scatter(*pos.T, c=activity[:, 23], cmap=custom_cmap, label = 'firing locations')
+
+    
+    ax.plot(*pos.T, lw=0.5, label = 'mice location')
+    plt.legend(loc='upper right')
+
+    if save:
+        plt.savefig(FIG_PATH+'rate_trajectory.png', transparent=True)
+
+    if show:
+        plt.show()
+    
+    return fig, ax
+
     

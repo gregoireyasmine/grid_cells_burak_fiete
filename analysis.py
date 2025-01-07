@@ -4,6 +4,7 @@ from scipy.ndimage import label, center_of_mass, gaussian_filter
 import numpy as np
 from sklearn.linear_model import LinearRegression
 from tqdm import tqdm
+import utils
 
 def pca_torch_gpu(data, num_components):
     device = data.device
@@ -116,5 +117,59 @@ def model_prediction(model_output, true_pos, silent=False, image_smoothing = 2, 
     return rescaled_pos, prop_factor, r2
 
         
+
+
+# extract mice rate map
+# start by running on the x axis
+def compute_ratemaps(grid, v=0.5):
+    dt = grid.options.dt
+    dx = v * dt
+    c = np.arange(-1, 1, dx)
+    pos = np.stack([c, -np.ones_like(c)], axis=1)[None,]
+    input_v = np.diff(pos, axis=1)/dt
     
+    grid.save_sim = False
+    S = grid.simulate(input_v, sim_id = None, silent=False, load=False) # set load = false to restart a new sim from scratch
+        
+    
+    num_batches = 10 # nb of batch reduces memory
+
+    # sample with a 1/40 ratio to get 100 positions
+    ratio = int(40/v)
+    new_dt = dt*ratio
+    pos = utils.downsample(pos.squeeze(), new_dt=new_dt, old_dt = dt)[None]
+    S = utils.downsample(S.squeeze(), new_dt=new_dt, old_dt = dt)
+    
+    tot_steps = input_v.shape[1]
+    batch_v = input_v[:, :tot_steps//num_batches, :]
+    batch_v = np.concatenate([batch_v]*pos.shape[1], axis=0)[:, :, [1, 0]]
+    
+    ratemap = np.zeros((100, 100, grid.options.n**2))
+    samples_per_batch = tot_steps//(ratio*num_batches) +1
+
+    s_0 = S
+    for b in tqdm(range(num_batches)):
+        S = grid.simulate(batch_v, s_0 = s_0, sim_id = None, silent=True, load=False) # set load = false to restart a new sim from scratch
+        s_0 = S[:, -1, :]
+        activity = utils.downsample(S, new_dt=new_dt, old_dt = dt, axis=1)
+        ratemap[:, b*samples_per_batch:(b+1)*samples_per_batch, :] = activity
+        del S
+
+    s_0 = ratemap.reshape(-1, ratemap.shape[-1])
+    T = 0.1
+    num_steps = int(T/dt)
+    zero_v= np.zeros((s_0.shape[0], num_steps, 2))
+    
+    batch_size = 100
+    num_batches = zero_v.shape[0]//batch_size
+    
+    activity = np.zeros_like(s_0)
+    for b in tqdm(range(num_batches)):
+        S = grid.simulate(zero_v[:batch_size], s_0 = s_0[b*batch_size:(b+1)*batch_size], sim_id = None, silent=True, load=False)
+        activity[b*batch_size:(b+1)*batch_size] = S[:, -1, :]
+    
+    ratemap = activity.reshape(grid.options.n, grid.options.n, -1)
+    return ratemap
+
+
     
