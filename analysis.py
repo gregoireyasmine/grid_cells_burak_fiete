@@ -18,7 +18,7 @@ def pca_torch_gpu(data, num_components):
     eigvecs = eigvecs[:, sorted_indices]
 
     components = eigvecs[:, :num_components]
-    explained_variance = eigvals[:num_components]
+    explained_variance = eigvals[:num_components]/eigvals.sum()
 
     projected_data = torch.mm(centered_data, components)
 

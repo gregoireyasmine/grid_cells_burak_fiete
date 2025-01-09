@@ -12,7 +12,7 @@ class Place_cells():
     Cells activate proportionally to the distance between their preferred location and the animal position.
     """
     
-    def __init__(self, sheet_size, sigma, space_size, device):
+    def __init__(self, sheet_size, sigma, space_size, device, sigma2=None):
         '''
         Args:
             sheet_size: Number of cells on the grid
@@ -27,16 +27,30 @@ class Place_cells():
         self.loc_box = (self.loc_sheet/self.sheet_size - 1/2) * space_size
         
         self.sigma = sigma
+        self.sigma2 = sigma2
+        
         self.logsoftmax = torch.nn.LogSoftmax(dim=-1)
         self.softmax = torch.nn.Softmax(dim=-1)
 
     def out(self, pos):
         """ Return grid cell pattern activation """
         dist = ((pos[:, :, None, :] - self.loc_box[None, None, :])**2).sum(axis=-1)
-        return self.softmax(- self.sigma**(-2) * dist)
         
+        out = self.softmax(- self.sigma**(-2) * dist)
+
+        if self.sigma2 is not None :
+            out -= self.softmax(-self.sigma2**(-2) * dist)
+
+            # Shift and scale outputs so that they lie in [0,1].
+            min_out,_ = out.min(-1,keepdims=True)
+            out += torch.abs(min_out)
+            out /= out.sum(-1, keepdims=True)
+        return out
+
     def logout(self, pos):
         """ Return log grid cell pattern activation (for computational stability during training)"""
+        if self.sigma2 is not None :
+            raise NotImplementedError
         dist = ((pos[:, :, None, :] - self.loc_box[None, None, :])**2).sum(axis=-1)
         return self.logsoftmax(- self.sigma**(-2) * dist)
 
@@ -63,11 +77,15 @@ class RNN_options():
         self.device = "cuda" if torch.cuda.is_available() else 'cpu'
         self.clip_grad = False
         self.debug = False
+        self.pc_sigma2 = None
+
 
     def _str(self,):
        attributes = vars(self).copy()
        del attributes['save_dir']
        del attributes['debug']
+       del attributes['clip_grad']
+       del attributes['optimizer']
        return "_".join([f"{key}_{value}" for key, value in attributes.items()])
 
     
@@ -84,7 +102,7 @@ class TrainableNetwork(torch.nn.Module):
         self.n_gc = options.gc_sheet_size**2
         self.n_pc = options.pc_sheet_size**2
         
-        self.place_cells = Place_cells(options.pc_sheet_size, options.pc_sigma, options.box_width, options.device)
+        self.place_cells = Place_cells(options.pc_sheet_size, options.pc_sigma, options.box_width, options.device, sigma2 = options.pc_sigma2)
 
         self.encoder = torch.nn.Linear(self.n_pc, self.n_gc, bias=False).to(options.device)
         self.RNN = torch.nn.RNN(input_size=2,
@@ -120,7 +138,7 @@ class TrainableNetwork(torch.nn.Module):
         loss = -(true_gc*logpred).sum(-1).mean() # CE Loss with precomputed log (numerical stability)
         # Weight regularization 
         loss += self.options.weight_decay * (self.RNN.weight_hh_l0**2).sum()
-
+        
         # Compute decoding error
         pred_pos = self.place_cells.loc_box[torch.argmax(logpred, axis=-1)] 
         err = torch.sqrt(((pos - pred_pos)**2).sum(-1)).mean()
@@ -223,7 +241,7 @@ class Trainer(object):
         fig, ax = plt.subplots(1, 2, figsize=(10, 4))
         ax[0].plot(np.log(self.loss))
         ax[0].set_title("Log Loss")
-        ax[1].plot(self.err*100)
+        ax[1].plot(np.array(self.err)*100)
         ax[1].set_title("Error (cm)")
         ax[0].set_xlabel('Step')
         ax[1].set_xlabel('Step')

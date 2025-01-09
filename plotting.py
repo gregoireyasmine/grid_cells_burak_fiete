@@ -317,9 +317,9 @@ def present_training_environment(network, trainer, num_trajectories = 10, show=T
     return fig, ax
 
 
-def show_training_results(trainer, model, num_trajectories = 10000, sequence_length = 20, plotted_trajectories = 10, dt=1e-2, show=True):
+def show_training_results(trainer, model, num_trajectories = 10000, sequence_length = 20, plotted_trajectories = 10, dt=1e-2, show=True, save=False):
     
-    fig, ax = plt.subplots(1, 2, figsize = (9, 3.5), dpi=200)
+    fig, ax = plt.subplots(1, 2, figsize = (7, 3.5), dpi=200)
         
     inputs, trajectories = trainer.generator.batch(n_trajectories = num_trajectories, sequence_length = sequence_length, dt=dt)
     
@@ -335,16 +335,21 @@ def show_training_results(trainer, model, num_trajectories = 10000, sequence_len
     handles, labels = ax[0].get_legend_handles_labels()
     unique = dict(zip(labels, handles))
     ax[0].legend(unique.values(), unique.keys(), loc = 'upper right')
-    
+
     ax[1].plot(err*100)
     ax[1].fill_between(range(sequence_length), (err-sem)*100, (err+sem)*100, alpha = 0.2)
     ax[1].set_xlabel('time step in trajectory')
     ax[1].set_ylabel('average error (cm)')
     # ax[1].yaxis.set_major_formatter(FormatStrFormatter('%.1f'))
+    plt.tight_layout()
+    if save:
+        plt.savefig(FIG_PATH+f"training_results_seq_len_{sequence_length}_dt_{dt}.png", transparent=True)
 
+    
     if show:
         plt.show()
 
+    
     return fig, ax
 
 
