@@ -1,4 +1,4 @@
 sim_data/*
 models/*
 __pycache__/*
-
+example_models/ratemap_*
