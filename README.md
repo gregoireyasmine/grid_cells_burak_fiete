@@ -5,7 +5,7 @@ This repo includes reproductions of part of the results from
 
 as well as complementary investigations on the normative validity of this model. 
 
-This project is our final project for Theoretical Neuroscience class at ENS-PSL. An overview of the work is available in the **evaluate_grid.ipynb** notebook
+This is our final project for Theoretical Neuroscience class at ENS-PSL. An overview of the work is available in the **evaluate_grid.ipynb** notebook
 
 
 ### Python files descriptions
