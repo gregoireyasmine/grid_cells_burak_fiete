@@ -3,7 +3,7 @@ This repo includes reproductions of part of the results from
 ### Accurate Path Integration in Continuous Attractor Network Models of Grid Cells 
 #### Burak & Fiete 2009
 
-as well as complementary investigations on the normative validity of this model. 
+as well as complementary investigations on the normative validity of this model based on Sorscher _et al._ work. We perform a directed dimensionality reduction of Burak's model. We train a RNN to integrate velocity input in order to accurately track position. The resulting RNN cells have grid cell-like activity but with a different, square pattern. Varying the parameters allows to observe other types of ratemaps (half-planes, hexagonal grids, ...).
 
 This is our final project for Theoretical Neuroscience class at ENS-PSL. An overview of the work is available in the **evaluate_grid.ipynb** notebook
 
