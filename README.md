@@ -14,6 +14,7 @@ This is our final project for Theoretical Neuroscience class at ENS-PSL. An over
 
 ![image](https://github.com/user-attachments/assets/a1512c6a-68ea-4ff0-a44e-d84186fd3fe4)
 
+![image](https://github.com/user-attachments/assets/25e4d400-773c-43da-a325-b8238137447c)
 
 
 ### Python files descriptions
