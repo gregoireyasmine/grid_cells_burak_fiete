@@ -8,6 +8,11 @@ as well as complementary investigations on the normative validity of this model.
 This is our final project for Theoretical Neuroscience class at ENS-PSL. An overview of the work is available in the **evaluate_grid.ipynb** notebook
 
 
+### Results 
+
+
+
+
 ### Python files descriptions
 - **grid.py** The continuous attractor model code
 - **options.py** The options object class for defining grid models
