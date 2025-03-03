@@ -10,6 +10,9 @@ This is our final project for Theoretical Neuroscience class at ENS-PSL. An over
 
 ### Results 
 
+![image](https://github.com/user-attachments/assets/0156df65-054c-4788-b61a-0fc6302b8de5)
+
+
 
 
 
